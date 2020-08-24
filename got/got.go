@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"got/metadata"
 	"got/progress"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"path"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/muesli/termenv"
 )
@@ -25,23 +24,49 @@ type Download struct {
 	DirPath       string
 }
 
+func Got(url string, path string) error {
+	if path == "" {
+		path, err := os.Getwd()
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+		err = Letsgot(url, path)
+		if err != nil {
+			return err
+		}
+
+	} else {
+		err := Letsgot(url, path)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func NewGot() error {
-
-	//startTime := time.Now()
-	var bar progress.Bar
-	bar.NewOption(0, 10)
-
 	url, err := getlink()
-
 	if err != nil {
 		return err
 	}
-
 	path, err := os.Getwd()
 	if err != nil {
 		log.Println(err)
 		return err
 	}
+	err = Letsgot(url, path)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func Letsgot(url string, path string) error {
+
+	//startTime := time.Now()
+	var bar progress.Bar
+	bar.NewOption(0, 10)
 
 	d := Download{
 		URL:           url,
@@ -50,7 +75,7 @@ func NewGot() error {
 		DirPath:       path,
 	}
 
-	if err := d.Do(&bar); err != nil {
+	if err := d.do(&bar); err != nil {
 		fmt.Printf("\n%s\n", termenv.String("An error occured while downloading the file").Foreground(CProfile.Color("0")).Background(CProfile.Color("#E88388")))
 		// fmt.Printf("\n%s", err)
 		log.Fatal(err)
@@ -64,7 +89,7 @@ func NewGot() error {
 
 func getlink() (string, error) {
 	var url string
-	fmt.Printf("%s\n", termenv.String("🖊️  Paste the url here").Bold().Foreground(CProfile.Color("#FDD835")))
+	fmt.Printf("%s\n", termenv.String("Enter URL").Foreground(CProfile.Color("#FDD835")))
 	fmt.Scanf("%s\n", &url)
 
 	if url == "" {
@@ -73,7 +98,8 @@ func getlink() (string, error) {
 	}
 	return url, nil
 }
-func (d Download) Do(bar *progress.Bar) error {
+
+func (d Download) do(bar *progress.Bar) error {
 
 	fmt.Printf("\n%s\n", termenv.String("🔍 CHECKING URL ").Bold().Foreground(CProfile.Color("#FDD835")))
 
@@ -89,33 +115,36 @@ func (d Download) Do(bar *progress.Bar) error {
 	}
 
 	if resp.StatusCode > 299 {
-		return fmt.Errorf("Can't process, response is %v", resp.StatusCode)
+		return fmt.Errorf("Can't process, got %v response", resp.StatusCode)
 	}
 
-	//fmt.Printf("\n%s\n", termenv.String(" URL OK ").Bold().Foreground(p.Color("#8BC34A")))
+	fmt.Printf("\n%s\n", termenv.String(" URL OK ").Bold().Foreground(CProfile.Color("#8BC34A")))
 	size, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	if err != nil {
+		return err
+	}
 
 	a := metadata.GetFileName(resp)
 	d.TargetPath = a
 
-	if err != nil {
-		return err
-	}
 	var yesOrNo string
-	//fmt.Printf("\n%s %f %s\n", termenv.String(" 🗂  SIZE IS ").Bold().Foreground(p.Color("#FFB300")), (float64(size)*float64(0.001))/1000, "MB")
-	//fmt.Printf("\n%s\n", termenv.String(" 🚀 PROCEED DOWNLOADING (y/n)").Bold().Foreground(p.Color("#FFB300")))
+	fmt.Printf("\n%s %f %s\n", termenv.String(" => SIZE IS ").Bold().Foreground(CProfile.Color("#FFB300")), (float64(size)*float64(0.001))/1000, "MB")
+	fmt.Printf("\n%s\n", termenv.String("🌑 PROCEED DOWNLOADING ? ([Y}es/[N]o)").Bold().Foreground(CProfile.Color("#FFB300")))
 	fmt.Scanf("%s", &yesOrNo)
 
-	if yesOrNo == "n" {
-		//fmt.Printf("%s\n", termenv.String("EXITING").Bold().Foreground(p.Color("#FF7043")))
+	if yesOrNo == "n" || yesOrNo == "no" || yesOrNo == "N" || yesOrNo == "NO" || yesOrNo == "nO" || yesOrNo == "No" {
+		fmt.Printf("%s\n", termenv.String("🚫EXITING").Bold().Foreground(CProfile.Color("#FF7043")))
 		os.Exit(2)
 		return nil
 	}
+
+	fmt.Printf("\n%s\n", termenv.String("🚀 Starting Download... ").Bold().Foreground(CProfile.Color("#8BC34A")))
 
 	var sections = make([][2]int, d.TotalSections)
 
 	eachSize := size / d.TotalSections
 
+	now := time.Now()
 	for i := range sections {
 		if i == 0 {
 			sections[i][0] = 0
@@ -146,36 +175,10 @@ func (d Download) Do(bar *progress.Bar) error {
 
 	}
 	wg.Wait()
-	return d.mergeFiles(sections)
-}
+	err = d.mergeFiles(sections)
+	fmt.Printf("\n\n ✅ Download completed in %v seconds\n", time.Since(now))
 
-func (d Download) downloadSection(i int, c [2]int, sum *int, bar *progress.Bar) error {
-	r, err := d.getNewRequest("GET")
-	if err != nil {
-		return err
-	}
-	r.Header.Set("Range", fmt.Sprintf("bytes=%v-%v", c[0], c[1]))
-	resp, err := http.DefaultClient.Do(r)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode > 299 {
-		return fmt.Errorf("Can't process, response is %v", resp.StatusCode)
-	}
-
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	err = ioutil.WriteFile(path.Join(d.DirPath, fmt.Sprintf("section-%v.tmp", i)), b, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("section-%v.tmp", i)
-	*sum = *sum + 1
-	bar.Play(int64(*sum))
-
-	return nil
+	return err
 }
 
 // Get a new http request
@@ -190,31 +193,4 @@ func (d Download) getNewRequest(method string) (*http.Request, error) {
 	}
 	r.Header.Set("User-Agent", "TDM")
 	return r, nil
-}
-
-func (d Download) mergeFiles(sections [][2]int) error {
-	f, err := os.OpenFile(path.Join(d.DirPath, d.TargetPath), os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	for i := range sections {
-		tmpFileName := fmt.Sprintf("section-%v.tmp", i)
-		b, err := ioutil.ReadFile(path.Join(d.DirPath, tmpFileName))
-		if err != nil {
-			return err
-		}
-		_, err = f.Write(b)
-		if err != nil {
-			return err
-		}
-		err = os.Remove(tmpFileName)
-		if err != nil {
-			return err
-		}
-
-	}
-
-	return nil
-
 }
