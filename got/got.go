@@ -138,7 +138,7 @@ func (d Download) do(bar *progress.Bar) error {
 		return nil
 	}
 
-	fmt.Printf("\n%s\n", termenv.String("🚀 Starting Download... ").Bold().Foreground(CProfile.Color("#8BC34A")))
+	fmt.Printf("\n%s\n", termenv.String("🚀 Downloading... ").Bold().Foreground(CProfile.Color("#8BC34A")))
 
 	var sections = make([][2]int, d.TotalSections)
 
@@ -175,6 +175,8 @@ func (d Download) do(bar *progress.Bar) error {
 
 	}
 	wg.Wait()
+	fmt.Printf("\n%s\n", termenv.String("🚀 Merging... ").Bold().Foreground(CProfile.Color("#8BC34A")))
+
 	err = d.mergeFiles(sections)
 	fmt.Printf("\n\n ✅ Download completed in %v seconds\n", time.Since(now))
 
